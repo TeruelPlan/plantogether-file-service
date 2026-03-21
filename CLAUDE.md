@@ -1,12 +1,15 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude when working with code in this repository.
 
 ## Commands
 
 ```bash
 # Build
 mvn clean package
+
+# Build without tests
+mvn clean package -DskipTests
 
 # Run locally
 mvn spring-boot:run
@@ -20,52 +23,89 @@ mvn test -Dtest=ClassName
 # Run a single test method
 mvn test -Dtest=ClassName#methodName
 
-# Build Docker image
+# Docker build
 docker build -t plantogether-file-service .
 ```
 
-The `plantogether-common` dependency (shared exceptions/DTOs) must be installed in the local Maven repository before building:
+**Prerequisites:**
 ```bash
-# From the plantogether-common module root:
-mvn install -DskipTests
+cd ../plantogether-proto && mvn clean install
+cd ../plantogether-common && mvn clean install
 ```
 
 ## Architecture
 
-This is a Spring Boot 3.3.6 microservice (Java 21) in the PlanTogether platform. It runs on port **8088**.
+Spring Boot 3.3.6 microservice (Java 21). Manages file storage via MinIO presigned URLs. **Files never pass
+through this service** — the service only generates short-lived signed URLs for clients to upload/download
+directly to/from MinIO.
 
-**Core concept — presigned URLs:** Files never pass through this service. The service generates short-lived presigned URLs (1h default) for clients to upload/download directly to/from MinIO. The service only manages metadata in PostgreSQL and validates permissions.
+**Ports:** REST `8088` · gRPC `9088`
 
-**Key infrastructure dependencies:**
-- **MinIO** (S3-compatible): actual file storage, accessed via AWS SDK S3 v2
-- **PostgreSQL** (`plantogether_file` DB): `FileMetadata` table tracking uploads
-- **Redis**: caches file metadata (TTL 1h)
-- **RabbitMQ**: async event messaging
-- **Keycloak**: JWT authentication (realm roles extracted from `realm_access.roles` claim)
-- **Eureka**: service discovery
+**Package:** `com.plantogether.file`
 
-**Security:** `KeycloakJwtConverter` extracts Keycloak realm roles and maps them to `ROLE_<ROLE>` Spring authorities. All endpoints require authentication except `/actuator/health` and `/actuator/info`. Method-level security (`@EnableMethodSecurity`) is enabled.
+### Package structure
 
-**Database schema:** Managed by Flyway (`src/main/resources/db/migration/`). `ddl-auto: validate` — Hibernate validates against the schema, never modifies it. Add new migrations as `V{n}__description.sql`.
+```
+com.plantogether.file/
+├── config/          # SecurityConfig, MinioConfig
+├── controller/      # REST controllers
+├── service/         # PresignedUrlService
+├── dto/             # Request/Response DTOs (Lombok @Data @Builder)
+└── grpc/
+    └── server/      # FileGrpcServiceImpl (exposes gRPC on port 9088)
+```
 
-**MinIO file key structure:** `trips/{tripId}/{CATEGORY}/{uuid}-{filename}`
+No database — this service does not persist any data (per DTA v2.9).
 
-**File categories:** `TRIP_COVER`, `DESTINATION_PHOTO`, `EXPENSE_RECEIPT`, `CHAT_IMAGE`, `USER_AVATAR`
+### Infrastructure dependencies
 
-**Exception handling:** `GlobalExceptionHandler` handles `ResourceNotFoundException` and `AccessDeniedException` from `plantogether-common`, plus `MethodArgumentNotValidException`. All return `ErrorResponse` from the common library.
+| Dependency | Default (local) | Purpose |
+|---|---|---|
+| MinIO | `localhost:9000` | Actual file storage (S3-compatible, via AWS SDK v2) |
+| Keycloak 24+ | `localhost:8180` | JWT authentication |
 
-## Environment Variables
+
+### gRPC server (port 9088)
+
+Implements `FileGrpcService` (defined in `plantogether-proto`):
+
+| Method | Description |
+|---|---|
+| `GetPresignedUrl(key, operation)` | Returns a short-lived presigned MinIO URL for `UPLOAD` or `DOWNLOAD` |
+
+Called by all other microservices that need to generate upload/download URLs for files.
+
+### MinIO key structure
+
+`trips/{tripId}/{CATEGORY}/{uuid}-{filename}`
+
+File categories: `TRIP_COVER`, `DESTINATION_PHOTO`, `EXPENSE_RECEIPT`, `CHAT_IMAGE`, `USER_AVATAR`.
+
+Presigned URL TTL: 1h for upload, 1h for download.
+
+### REST API (`/api/v1/files/`)
+
+| Method | Endpoint | Notes |
+|---|---|---|
+| POST | `/api/v1/files/presigned-upload` | Get a presigned PUT URL — body: `{ key, contentType }` |
+| GET | `/api/v1/files/{key}` | Get a presigned GET URL for reading |
+
+Flutter calls these endpoints to get the URL, then uploads/downloads directly to MinIO without going through
+this service again.
+
+### Security
+
+- Stateless JWT via `KeycloakJwtConverter` — `realm_access.roles` → `ROLE_<ROLE>` Spring authorities
+- Public endpoints: `/actuator/health`, `/actuator/info`
+- Rate limiting: 20 presigned upload requests per user per hour (Bucket4j + Redis)
+
+### Environment variables
 
 | Variable | Default | Description |
 |---|---|---|
-| `DB_HOST` | `localhost` | PostgreSQL host |
-| `DB_USER` | `plantogether` | DB username |
-| `DB_PASSWORD` | `plantogether` | DB password |
-| `RABBITMQ_HOST` | `localhost` | RabbitMQ host |
-| `REDIS_HOST` | `localhost` | Redis host |
 | `KEYCLOAK_URL` | `http://localhost:8180` | Keycloak base URL |
-| `EUREKA_URL` | `http://localhost:8761/eureka/` | Eureka server |
-| `MINIO_ENDPOINT` | — | MinIO endpoint URL |
+| `MINIO_ENDPOINT` | — | MinIO endpoint URL (e.g. `http://localhost:9000`) |
 | `MINIO_ACCESS_KEY` | — | MinIO access key |
 | `MINIO_SECRET_KEY` | — | MinIO secret key |
-| `MINIO_BUCKET` | `plantogether` | Target bucket |
+| `MINIO_BUCKET` | `plantogether` | Target bucket name |
+
