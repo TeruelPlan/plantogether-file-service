@@ -35,7 +35,7 @@ cd ../plantogether-common && mvn clean install
 
 ## Architecture
 
-Spring Boot 3.3.6 microservice (Java 21). Manages file storage via MinIO presigned URLs. **Files never pass
+Spring Boot 3.3.6 microservice (Java 25). Manages file storage via MinIO presigned URLs. **Files never pass
 through this service** — the service only generates short-lived signed URLs for clients to upload/download
 directly to/from MinIO.
 
