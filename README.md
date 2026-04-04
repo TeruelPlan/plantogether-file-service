@@ -1,47 +1,47 @@
 # File Service
 
-> Service de gestion des fichiers via presigned URLs MinIO (S3-compatible)
+> File management service via MinIO presigned URLs (S3-compatible)
 
-## Rôle dans l'architecture
+## Role in the Architecture
 
-Le File Service génère des presigned URLs pour les uploads et downloads de fichiers dans MinIO. **Aucun fichier
-ne transite par ce service** : il agit comme un proxy de génération d'URLs signées. Les autres services peuvent
-également l'appeler via gRPC pour obtenir des URLs de lecture (ex. photo de justificatif).
+The File Service generates presigned URLs for uploading and downloading files in MinIO. **No file
+passes through this service** — it acts as a signed URL generation proxy. Other services can also
+call it via gRPC to obtain read URLs (e.g. receipt photos).
 
-## Fonctionnalités
+## Features
 
-- Génération de presigned PUT URLs pour l'upload direct vers MinIO (durée limitée)
-- Génération de presigned GET URLs pour la lecture sécurisée
-- Vérification JWT avant toute génération d'URL
-- Exposition d'un serveur gRPC (`GetPresignedUrl`) consommé par les autres services
+- Presigned PUT URL generation for direct upload to MinIO (time-limited)
+- Presigned GET URL generation for secure reading
+- Device identity verification before any URL generation
+- gRPC server (`GetPresignedUrl`) consumed by other services
 
-## Endpoints REST
+## REST Endpoints
 
-| Méthode | Endpoint | Description |
-|---------|----------|-------------|
-| POST | `/api/v1/files/presigned-upload` | Obtenir un presigned PUT URL (upload direct vers MinIO) |
-| GET | `/api/v1/files/{key}` | Obtenir un presigned GET URL (lecture) |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/files/presigned-upload` | Get a presigned PUT URL (direct upload to MinIO) |
+| GET | `/api/v1/files/{key}` | Get a presigned GET URL (read) |
 
 ## gRPC Server (port 9088)
 
-Le File Service expose un serveur gRPC consommé par les autres microservices :
+The File Service exposes a gRPC server consumed by other microservices:
 
 | RPC | Description |
 |-----|-------------|
-| `GetPresignedUrl(key)` | Génère un presigned GET URL pour la clé donnée |
+| `GetPresignedUrl(key)` | Generates a presigned GET URL for the given key |
 
-## Flux d'upload
+## Upload Flow
 
-1. Le client Flutter appelle `POST /api/v1/files/presigned-upload` avec le nom et type du fichier
-2. Le File Service génère une clé unique (`trip/{tripId}/{uuid}.{ext}`) et un presigned PUT URL (validité 15 min)
-3. Flutter upload directement vers MinIO via le presigned PUT URL (sans passer par l'API)
-4. Flutter transmet la clé (ex. `trip/abc/photo.jpg`) au service concerné (trip-service, expense-service, etc.)
-5. Pour la lecture, le service appelle `GetPresignedUrl` via gRPC ou Flutter appelle `GET /api/v1/files/{key}`
+1. The Flutter client calls `POST /api/v1/files/presigned-upload` with the file name and type
+2. The File Service generates a unique key (`trip/{tripId}/{uuid}.{ext}`) and a presigned PUT URL (15 min validity)
+3. Flutter uploads directly to MinIO via the presigned PUT URL (without going through the API)
+4. Flutter sends the key (e.g. `trip/abc/photo.jpg`) to the relevant service (trip-service, expense-service, etc.)
+5. For reading, the service calls `GetPresignedUrl` via gRPC or Flutter calls `GET /api/v1/files/{key}`
 
-## Modèle de données
+## Data Model
 
-Ce service ne possède **pas de base de données** — il est sans état. Les clés MinIO sont gérées
-directement par les services métier (stockées dans leurs propres tables : `cover_image_key`, `receipt_key`, `image_key`).
+This service has **no database** — it is stateless. MinIO keys are managed directly by business services
+(stored in their own tables: `cover_image_key`, `receipt_key`, `image_key`).
 
 ## Configuration
 
@@ -65,31 +65,32 @@ grpc:
     port: 9088
 ```
 
-## Lancer en local
+## Running Locally
 
 ```bash
-# Prérequis : docker compose --profile essential up -d (MinIO inclus)
-# + plantogether-proto et plantogether-common installés
+# Prerequisites: docker compose up -d (MinIO included)
+# + plantogether-proto and plantogether-common installed
 
 mvn spring-boot:run
 ```
 
-## Dépendances
+## Dependencies
 
-- **Keycloak 24+** : validation JWT (endpoints REST)
-- **MinIO** : stockage objet S3-compatible (presigned URLs)
-- **plantogether-proto** : contrats gRPC (serveur exposé sur 9088)
-- **plantogether-common** : CorsConfig, sécurité partagée
+- **MinIO**: S3-compatible object storage (presigned URLs)
+- **plantogether-proto**: gRPC contracts (server exposed on 9088)
+- **plantogether-common**: DeviceIdFilter, SecurityAutoConfiguration, CorsConfig
 
 ## Rate Limiting
 
-| Règle | Limite |
-|-------|--------|
-| `POST /api/v1/files/presigned-upload` | 20 uploads / heure / utilisateur |
+| Rule | Limit |
+|------|-------|
+| `POST /api/v1/files/presigned-upload` | 20 uploads / hour / device |
 
-## Sécurité
+## Security
 
-- Tous les endpoints REST requièrent un token Bearer Keycloak valide
-- Les presigned URLs expirent après 15 minutes (upload) / durée configurable (lecture)
-- Les clés MinIO suivent un pattern structuré (`trip/{tripId}/{uuid}.{ext}`) pour éviter les collisions
-- Aucune donnée utilisateur n'est stockée dans ce service
+- Anonymous device-based identity: `X-Device-Id` header on every request
+- `DeviceIdFilter` (from plantogether-common, auto-configured via `SecurityAutoConfiguration`) extracts the device UUID and sets the SecurityContext principal
+- No JWT, no Keycloak, no login, no sessions
+- Presigned URLs expire after 15 minutes (upload) / configurable duration (read)
+- MinIO keys follow a structured pattern (`trip/{tripId}/{uuid}.{ext}`) to avoid collisions
+- No user data is stored in this service
