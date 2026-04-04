@@ -35,7 +35,7 @@ cd ../plantogether-common && mvn clean install
 
 ## Architecture
 
-Spring Boot 3.3.6 microservice (Java 21). Manages file storage via MinIO presigned URLs. **Files never pass
+Spring Boot 3.3.6 microservice (Java 25). Manages file storage via MinIO presigned URLs. **Files never pass
 through this service** — the service only generates short-lived signed URLs for clients to upload/download
 directly to/from MinIO.
 
@@ -47,7 +47,7 @@ directly to/from MinIO.
 
 ```
 com.plantogether.file/
-├── config/          # SecurityConfig, MinioConfig
+├── config/          # MinioConfig
 ├── controller/      # REST controllers
 ├── service/         # PresignedUrlService
 ├── dto/             # Request/Response DTOs (Lombok @Data @Builder)
@@ -55,14 +55,13 @@ com.plantogether.file/
     └── server/      # FileGrpcServiceImpl (exposes gRPC on port 9088)
 ```
 
-No database — this service does not persist any data (per DTA v2.9).
+No database — this service does not persist any data.
 
 ### Infrastructure dependencies
 
 | Dependency | Default (local) | Purpose |
 |---|---|---|
 | MinIO | `localhost:9000` | Actual file storage (S3-compatible, via AWS SDK v2) |
-| Keycloak 24+ | `localhost:8180` | JWT authentication |
 
 
 ### gRPC server (port 9088)
@@ -95,17 +94,18 @@ this service again.
 
 ### Security
 
-- Stateless JWT via `KeycloakJwtConverter` — `realm_access.roles` → `ROLE_<ROLE>` Spring authorities
+- Anonymous device-based identity via `DeviceIdFilter` (from `plantogether-common`, auto-configured via `SecurityAutoConfiguration`)
+- `X-Device-Id` header extracted and set as SecurityContext principal
+- No JWT, no Keycloak, no login, no sessions
+- No SecurityConfig.java needed — `SecurityAutoConfiguration` handles everything
 - Public endpoints: `/actuator/health`, `/actuator/info`
-- Rate limiting: 20 presigned upload requests per user per hour (Bucket4j + Redis)
+- Rate limiting: 20 presigned upload requests per device per hour (Bucket4j + Redis)
 
 ### Environment variables
 
 | Variable | Default | Description |
 |---|---|---|
-| `KEYCLOAK_URL` | `http://localhost:8180` | Keycloak base URL |
 | `MINIO_ENDPOINT` | — | MinIO endpoint URL (e.g. `http://localhost:9000`) |
 | `MINIO_ACCESS_KEY` | — | MinIO access key |
 | `MINIO_SECRET_KEY` | — | MinIO secret key |
 | `MINIO_BUCKET` | `plantogether` | Target bucket name |
-
