@@ -28,14 +28,19 @@ docker build -t plantogether-file-service .
 ```
 
 **Prerequisites:**
+
+Local Maven builds resolve `plantogether-parent`, `plantogether-bom`, `plantogether-common`, and `plantogether-proto`
+from GitHub Packages. Export a PAT with `read:packages` scope before running any `mvn` command:
+
 ```bash
-cd ../plantogether-proto && mvn clean install
-cd ../plantogether-common && mvn clean install
+export GITHUB_ACTOR=<your-github-username>
+export GITHUB_TOKEN=<your-PAT-with-read:packages>
+mvn -s .settings.xml clean package
 ```
 
 ## Architecture
 
-Spring Boot 3.3.6 microservice (Java 25). Manages file storage via MinIO presigned URLs. **Files never pass
+Spring Boot 3.5.9 microservice (Java 21). Manages file storage via MinIO presigned URLs. **Files never pass
 through this service** — the service only generates short-lived signed URLs for clients to upload/download
 directly to/from MinIO.
 
