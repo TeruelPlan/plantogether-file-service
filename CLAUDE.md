@@ -34,7 +34,7 @@ from GitHub Packages. Export a PAT with `read:packages` scope before running any
 
 ```bash
 export GITHUB_ACTOR=<your-github-username>
-export GITHUB_TOKEN=<your-PAT-with-read:packages>
+export PACKAGES_TOKEN=<your-PAT-with-read:packages>
 mvn -s .settings.xml clean package
 ```
 
