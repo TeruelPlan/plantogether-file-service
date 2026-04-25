@@ -15,6 +15,13 @@
     <name>plantogether-file-service</name>
     <description>Microservice File — uploads, presigned MinIO URLs</description>
 
+    <scm>
+        <connection>scm:git:https://github.com/TeruelPlan/plantogether-file-service.git</connection>
+        <developerConnection>scm:git:https://github.com/TeruelPlan/plantogether-file-service.git</developerConnection>
+        <url>https://github.com/TeruelPlan/plantogether-file-service</url>
+        <tag>HEAD</tag>
+    </scm>
+
     <dependencyManagement>
         <dependencies>
             <dependency>
